@@ -1,79 +1,125 @@
-// The screenshot scenes behind ?shot=start|play|end. Each one plays the real rules forward from a
-// fresh world for a fixed number of steps, steered by a simple autopilot (look ahead each way the
-// paddle could move, keep clear of blocks, chase the lowest coin when that is safe), so the frame
-// is what a short game really looks like and the same seed always gives the same frame.
-import { FIELD, PLAYER, STEP } from './config.js';
-import { EVENT_OVER, KIND_BLOCK } from './world.js';
-import { SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
+// Screenshot staging behind ?shot=chase|downtown|driving|mission (with &seed=N).
+// Each scene arranges a real moment of play — real cars, real police, a real mission
+// objective — then runs the ordinary simulation forward under scripted input for a
+// fixed number of steps, so the captured frame is the game itself, reproducible from
+// the seed. main.js paints the result and sets window.__shotReady.
+import { STEP } from './config.js';
+import { Car } from './vehicles.js';
+import { setWanted } from './police.js';
 
-const START_SECONDS = 5;
-const PLAY_SECONDS = 26;
-const END_LIMIT_SECONDS = 600;
-/**
- * How far ahead, in seconds, the autopilot checks each way it could move: the play scene's pilot
- * looks well ahead and keeps all its lives; the end scene's looks only a moment ahead, so it is
- * caught out once the blocks speed up, as a hurried player is.
- */
-const HORIZON_PLAY = 0.7;
-const HORIZON_END = 0.25;
-const SAMPLE = 1 / 30;
-const DIRECTIONS = [0, -1, 1];
-/** Extra room, each side, it keeps between the paddle and a block. */
-const MARGIN = 10;
-
-/** Seconds until moving in `direction` (-1, 0, 1) runs the paddle into a block; Infinity when it never does. */
-function timeToHit(state, direction, horizon) {
-  const player = state.player;
-  for (let t = SAMPLE; t <= horizon; t += SAMPLE) {
-    const x = Math.min(FIELD.width - player.width, Math.max(0, player.x + direction * PLAYER.speed * t));
-    for (let index = 0; index < state.items.length; index += 1) {
-      const item = state.items[index];
-      if (!item.active || item.kind !== KIND_BLOCK) continue;
-      const y = item.y + item.speed * t;
-      if (y + item.height > player.y && y < player.y + player.height && item.x < x + player.width + MARGIN && item.x + item.width > x - MARGIN) return t;
-    }
-  }
-  return Infinity;
+function run(world, stepWorld, seconds) {
+  const steps = Math.round(seconds / STEP);
+  for (let i = 0; i < steps; i += 1) stepWorld(world, STEP);
 }
 
-/** Of the safe ways to move, the one toward the lowest coin (or the centre); else the one that is hit last. */
-function autopilot(state, horizon) {
-  const player = state.player;
-  let coin = null;
-  for (let index = 0; index < state.items.length; index += 1) {
-    const item = state.items[index];
-    if (item.active && item.kind !== KIND_BLOCK && (coin === null || item.y > coin.y)) coin = item;
-  }
-  const target = coin === null ? FIELD.width / 2 : coin.x + coin.width / 2;
-  const centre = player.x + player.width / 2;
-  const wanted = target > centre + 8 ? 1 : target < centre - 8 ? -1 : 0;
-  let best = wanted;
-  let bestTime = timeToHit(state, wanted, horizon);
-  for (let index = 0; index < DIRECTIONS.length && bestTime !== Infinity; index += 1) {
-    const time = timeToHit(state, DIRECTIONS[index], horizon);
-    if (time > bestTime) {
-      bestTime = time;
-      best = DIRECTIONS[index];
-    }
-  }
-  return best;
+function putPlayerInCar(world, x, y, angle, color) {
+  const car = new Car(x, y, angle, color, 'player');
+  world.cars.push(car);
+  world.player.car = car;
+  world.player.x = x;
+  world.player.y = y;
+  world.player.angle = angle;
+  return car;
 }
 
-/**
- * Set `world` to the named scene (start, play or end; any other name is start) and return the
- * screen to draw over it and the best score to show.
- */
-export function stageShot(name, world) {
-  world.reset();
-  if (name !== 'play' && name !== 'end') {
-    for (let index = 0; index < START_SECONDS / STEP; index += 1) world.step(STEP, 0, true);
-    return { screen: SCREEN_TITLE, best: 0 };
+function addCop(world, x, y, angle) {
+  const cop = new Car(x, y, angle, '#eef1f5', 'police');
+  cop.cruise = 330;
+  world.cars.push(cop);
+  return cop;
+}
+
+/** Remove ambient traffic near a staged scene so nothing wanders into the frame. */
+function clearTrafficNear(world, x, y, radius) {
+  world.cars = world.cars.filter((car) => {
+    if (car.kind !== 'traffic') return true;
+    return Math.hypot(car.x - x, car.y - y) > radius;
+  });
+}
+
+/** The cover: a three-star chase down the central avenue, package job on the clock. */
+function stageChase(world, stepWorld) {
+  const y = world.city.hRoads[2]; // the middle east–west avenue
+  clearTrafficNear(world, 1400, y, 750);
+  world.director.begin(1); // Hot Package: objective marker out on Pier A
+  const car = putPlayerInCar(world, 1420, y + 24, 0, '#d64541');
+  car.vx = 260;
+  addCop(world, 1180, y - 24, 0).vx = 240;
+  addCop(world, 1090, y + 24, 0).vx = 230;
+  addCop(world, 1300, y - 24, 0).vx = 250;
+  setWanted(world, 3);
+  world.script = { throttle: 1, steer: 0 };
+  run(world, stepWorld, 2.1);
+  world.script = null;
+}
+
+/** On foot downtown: crowds, traffic, the first job waiting across town. */
+function stageDowntown(world, stepWorld) {
+  world.director.begin(0);
+  world.player.x = world.city.vRoads[3] - 62;
+  world.player.y = world.city.hRoads[2] + 58;
+  world.player.angle = Math.PI / 3;
+  // Aim ahead of the walk so the sprite faces where it is going.
+  world.input.mouse.x = 640 + 130;
+  world.input.mouse.y = 360 + 190;
+  world.script = { mx: 0.4, my: 1 };
+  run(world, stepWorld, 1.4);
+  world.script = null;
+}
+
+/** Fast driving down the beachfront avenue, traffic ahead, map open. */
+function stageDriving(world, stepWorld) {
+  world.director.begin(0);
+  const x = world.city.vRoads[6]; // the beachfront avenue
+  clearTrafficNear(world, x, 760, 620);
+  const car = putPlayerInCar(world, x - 24, 420, Math.PI / 2, '#f2c94c');
+  car.vy = 300;
+  world.script = { throttle: 1, steer: 0 };
+  run(world, stepWorld, 1.9);
+  world.script = null;
+}
+
+/** The dockside shootout: Mara's fourth job, mid-firefight among the containers. */
+function stageMission(world, stepWorld) {
+  world.director.begin(3);
+  const docks = world.city.places.docks;
+  // Walk the goto stage through instantly so the crew is on the field.
+  world.player.x = docks.x;
+  world.player.y = docks.y;
+  stepWorld(world, STEP);
+  world.player.x = docks.x - 270;
+  world.player.y = docks.y + 5;
+  world.player.weapon = 'pistol';
+  // Face and fire on the nearest thug in bursts: the player aims at the mouse, so the
+  // mouse is parked over the thug (the camera rides on the player, hence the offsets).
+  for (let burst = 0; burst < 5; burst += 1) {
+    const thug = world.peds.find((p) => p.role === 'thug' && !p.dead);
+    if (thug) {
+      world.input.mouse.x = 640 + (thug.x - world.player.x);
+      world.input.mouse.y = 360 + (thug.y - world.player.y);
+    }
+    world.input.mouse.down = burst % 2 === 0;
+    run(world, stepWorld, 0.24);
   }
-  const limit = name === 'end' ? END_LIMIT_SECONDS : PLAY_SECONDS;
-  const horizon = name === 'end' ? HORIZON_END : HORIZON_PLAY;
-  for (let index = 0; index < limit / STEP; index += 1) {
-    if (world.step(STEP, autopilot(world.state, horizon), false) & EVENT_OVER) break;
-  }
-  const over = world.state.lives === 0;
-  return { screen: over ? SCREEN_OVER : SCREEN_PLAY, best: world.state.score };
+  world.input.mouse.down = true;
+  run(world, stepWorld, 0.18);
+  world.input.mouse.down = false;
+}
+
+const SCENES = {
+  chase: stageChase,
+  downtown: stageDowntown,
+  driving: stageDriving,
+  mission: stageMission,
+};
+
+/** Stage the named scene (any other name stages the chase). */
+export function stageShot(world, name, stepWorld) {
+  world.screen = 'play';
+  const scene = SCENES[name] ?? stageChase;
+  scene(world, stepWorld);
+  // Settle the camera on the player so the frame is composed, not mid-lerp.
+  world.camera.x = world.player.x;
+  world.camera.y = world.player.y;
+  world.clampCamera();
 }

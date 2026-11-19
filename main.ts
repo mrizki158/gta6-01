@@ -1,3 +1,7 @@
+// SOLMARIS HEAT — an original open-world crime game built for gta6-01: a top-down 2D
+// coastal city (Solmaris) with driving, car theft, a 0–5 star wanted system, police
+// pursuit, on-foot combat, and a five-mission story chain from fixer Mara Voss, all in
+// vanilla Canvas/ES modules with WebAudio-synthesized sound and no external assets.
 // A working gta6-01 entry (Node 22, standard library only): the game is this directory's
 // game/ folder, plain static files a desktop browser loads offline (game/index.html and its ES
 // modules, no library and no network request), and the program hands it in. It copies game/ and

@@ -15,30 +15,63 @@ function stubInput() {
   };
 }
 
+function nearestLine(lines, v) {
+  return lines.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a), lines[0]);
+}
+
 function extraTraffic(game, rng, cx, cy, n) {
   const colors = ['#d64541', '#3f7fbf', '#e8b93e', '#59a96a', '#e6e6e6', '#8e6cc8'];
+  const { roadsV, roadsH } = game.city;
   for (let i = 0; i < n; i += 1) {
     const vertical = rng() < 0.5;
+    const dir = rng() < 0.5 ? 1 : -1;
+    let x;
+    let y;
+    let angle;
+    if (vertical) {
+      const line = nearestLine(roadsV, cx + (rng() - 0.5) * 500);
+      x = line + (dir > 0 ? -24 : 24);
+      y = cy + (rng() - 0.5) * 620;
+      angle = dir > 0 ? Math.PI / 2 : -Math.PI / 2;
+    } else {
+      const line = nearestLine(roadsH, cy + (rng() - 0.5) * 380);
+      y = line + (dir > 0 ? 24 : -24);
+      x = cx + (rng() - 0.5) * 860;
+      angle = dir > 0 ? 0 : Math.PI;
+    }
+    if (Math.hypot(x - cx, y - cy) < 120) continue; // keep the hero's space clear
     const car = makeCar(
-      cx + (rng() - 0.5) * 700,
-      cy + (rng() - 0.5) * 460,
-      vertical ? Math.PI / 2 : 0,
+      Math.max(60, Math.min(3380, x)),
+      Math.max(60, Math.min(2820, y)),
+      angle,
       colors[i % colors.length],
       'parked',
     );
-    car.x = Math.max(60, Math.min(3380, car.x));
-    car.y = Math.max(60, Math.min(2820, car.y));
     game.cars.push(car);
   }
 }
 
 function extraPeds(game, rng, cx, cy, n) {
   const shirts = ['#e74c3c', '#f1c40f', '#9b59b6', '#1abc9c', '#e67e22', '#ecf0f1'];
+  const { roadsV, roadsH } = game.city;
   for (let i = 0; i < n; i += 1) {
+    // pedestrians belong on sidewalks: hug a road edge near the focus
+    const vertical = rng() < 0.5;
+    let x;
+    let y;
+    if (vertical) {
+      const line = nearestLine(roadsV, cx + (rng() - 0.5) * 460);
+      x = line + (rng() < 0.5 ? -58 : 58);
+      y = cy + (rng() - 0.5) * 480;
+    } else {
+      const line = nearestLine(roadsH, cy + (rng() - 0.5) * 320);
+      y = line + (rng() < 0.5 ? -58 : 58);
+      x = cx + (rng() - 0.5) * 640;
+    }
     game.peds.push({
       id: 5000 + i,
-      x: cx + (rng() - 0.5) * 520,
-      y: cy + (rng() - 0.5) * 340,
+      x: Math.max(24, Math.min(3400, x)),
+      y: Math.max(24, Math.min(2856, y)),
       tx: cx, ty: cy,
       speed: 60, shirt: shirts[i % shirts.length], pants: '#2d3436',
       angle: rng() * 6.28, panic: 0, dead: false, downTime: 0,
@@ -104,6 +137,19 @@ export function setupShot(game, name, seed) {
     game.player.y = city.spots.fixer.y + 96;
     game.player.angle = -0.6;
     extraPeds(game, rng, city.spots.fixer.x, city.spots.fixer.y + 40, 9);
+    // a few citizens inside the plaza itself, around the fountain
+    const plazaShirts = ['#fd79a8', '#00b894', '#0984e3', '#e67e22'];
+    for (let i = 0; i < 4; i += 1) {
+      game.peds.push({
+        id: 6000 + i,
+        x: city.spots.fixer.x + (rng() - 0.5) * 220,
+        y: city.spots.fixer.y + (rng() - 0.5) * 200 + 30,
+        tx: city.spots.fixer.x, ty: city.spots.fixer.y,
+        speed: 55, shirt: plazaShirts[i], pants: '#2d3436',
+        angle: rng() * 6.28, panic: 0, dead: false, downTime: 0,
+        phase: rng() * 6, health: 60,
+      });
+    }
     extraTraffic(game, rng, city.spots.fixer.x, city.spots.fixer.y + 330, 5);
     game.playerPos.x = game.player.x;
     game.playerPos.y = game.player.y;
